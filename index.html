@@ -2,63 +2,78 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Random Meme Viewer</title>
+  <title>Random Dark Meme</title>
+  <style>
+    body { font-family: Arial; background:#111; color:#fff; text-align:center; }
+    img { max-width:90vw; max-height:80vh; border-radius:10px; margin-top:15px; }
+    button {
+      background:#fff; color:#000; padding:10px 20px; border:0;
+      border-radius:8px; cursor:pointer; font-size:18px; margin-top:20px;
+    }
+  </style>
 </head>
 <body>
-  <h1>Random Meme</h1>
-  <button id="new-meme">Get a new meme</button>
-  <div id="meme-container">
-    <h2 id="title"></h2>
-    <img id="meme-image" style="max-width: 90vw; max-height: 80vh;" />
-    <p id="subreddit"></p>
-  </div>
 
-  <script>
-    const subreddits = [
-      'Jokesuncensored',
-      'cursedmemes',
-      'dankmemes',
-      'darkmemes'
-    ];
+  <h1>Random Dark Meme</h1>
+  <button onclick="loadMeme()">Get Another</button>
 
-    async function getRandomMeme() {
-      // pick a random subreddit
-      const sr = subreddits[Math.floor(Math.random() * subreddits.length)];
-      const url = `https://www.reddit.com/r/${sr}/hot.json?limit=50`;
+  <h2 id="title"></h2>
+  <img id="image" />
+  <p id="sub"></p>
 
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          throw new Error(`HTTP error! status: ${resp.status}`);
-        }
-        const data = await resp.json();
-        const posts = data.data.children;
+<script>
+const subreddits = [
+  "Jokesuncensored",
+  "cursedmemes",
+  "darkmemes",
+  "OffensiveMemes",
+  "imgoingtohellforthis",
+  "dankmemes"
+];
 
-        // filter only image posts
-        const imagePosts = posts.filter(p => {
-          const u = p.data.url;
-          return (u.match(/\.(jpeg|jpg|png|gif)$/));
-        });
+// FREE CORS-friendly Reddit API mirror
+// (works in static browser apps)
+const API = "https://api.redditjs.com/r/";
 
-        if (imagePosts.length === 0) {
-          console.log('No image posts found, try again');
-          return;
-        }
+async function loadMeme() {
+  const sr = subreddits[Math.floor(Math.random() * subreddits.length)];
 
-        const post = imagePosts[Math.floor(Math.random() * imagePosts.length)].data;
-        document.getElementById('title').innerText = post.title;
-        document.getElementById('meme-image').src = post.url;
-        document.getElementById('subreddit').innerText = `r/${sr}`;
-      } catch (err) {
-        console.error('Error fetching meme:', err);
-        alert('Could not fetch meme (maybe CORS or Reddit blocked it).');
-      }
+  try {
+    const res = await fetch(`${API}${sr}/hot?limit=50`);
+    const json = await res.json();
+
+    // Redditjs.com mirrors Reddit’s structure
+    const posts = json.data.children;
+
+    // FILTER IMAGE POSTS ONLY
+    const imgs = posts.filter(p => {
+      const d = p.data;
+      const isImg = d.post_hint === "image";
+      const ext = d.url.match(/\.(jpg|jpeg|png|gif)$/i);
+      return isImg || ext;
+    });
+
+    if (imgs.length === 0) {
+      document.getElementById("title").innerText =
+        "No images found. Try again.";
+      return;
     }
 
-    document.getElementById('new-meme').onclick = getRandomMeme;
+    const meme = imgs[Math.floor(Math.random() * imgs.length)].data;
 
-    // load one on start
-    getRandomMeme();
-  </script>
+    document.getElementById("title").innerText = meme.title;
+    document.getElementById("image").src = meme.url;
+    document.getElementById("sub").innerText = `r/${sr}`;
+
+  } catch (e) {
+    console.error(e);
+    alert("Failed to load meme. Try again.");
+  }
+}
+
+// Load immediately on open
+loadMeme();
+</script>
+
 </body>
 </html>
