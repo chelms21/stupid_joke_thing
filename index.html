@@ -1,259 +1,52 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Random Dark Meme (static)</title>
-  <style>
-    body { font-family: system-ui, Arial; background:#0f0f11; color:#eee; display:flex; flex-direction:column; align-items:center; padding:24px; }
-    .card { max-width:960px; width:100%; text-align:center; }
-    img { max-width:90vw; max-height:70vh; border-radius:8px; margin-top:12px; box-shadow:0 6px 20px rgba(0,0,0,0.6); }
-    button { margin:12px; padding:10px 16px; font-size:16px; border-radius:8px; border:0; cursor:pointer; }
-    .meta { opacity:.9; }
-    .small { font-size:13px; color:#ccc; margin-top:6px; }
-    #log { margin-top:10px; color:#f88; font-family:monospace; white-space:pre-wrap; text-align:left; max-height:160px; overflow:auto; background:#111; padding:8px; border-radius:6px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Dark Meme Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f4f4f9;
+        }
+        #meme-container {
+            margin-top: 20px;
+        }
+        #meme-image {
+            max-width: 90%;
+            height: auto;
+            border: 5px solid #333;
+            border-radius: 8px;
+            display: none; /* Hidden until loaded */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #ff4500; /* Reddit Orange */
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #cc3700;
+        }
+    </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Random Dark Meme (static)</h1>
-    <div>
-      <label>Choose subreddits (comma separated):</label><br/>
-      <input id="subs" style="width:90%; padding:8px; margin-top:8px;" value="Jokesuncensored,cursedmemes,darkmemes,imgoingtohellforthis,dankmemes,OffensiveMemes" />
+    <h1>Pull a Random Dark Meme</h1>
+    <button onclick="fetchRandomMeme()">Generate New Meme</button>
+    <div id="meme-container">
+        <p id="loading-message">Click the button to load a meme...</p>
+        <img id="meme-image" src="" alt="Random Reddit Meme">
+        <p id="meme-title"></p>
+        
     </div>
 
-    <div>
-      <button id="get">Get a meme</button>
-      <button id="reload">Reload same</button>
-    </div>
-
-    <h2 id="title" class="meta"></h2>
-    <div id="info" class="small"></div>
-    <img id="meme" alt="meme image" />
-    <div id="log"></div>
-  </div>
-
-<script>
-(async function(){
-  // PUBLIC proxies to try (in order). You can reorder or add your own.
-  // Note: public proxies may rate-limit. If these fail, see notes below.
-  const PROXIES = [
-    { name: 'AllOrigins (raw)', build: url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url) },
-    { name: 'ThingProxy', build: url => 'https://thingproxy.freeboard.io/fetch/' + url },
-    // jina.ai provides a fetch proxy for webpages — for reddit JSON use this format:
-    { name: 'r.jina.ai', build: url => {
-        // url should be reddit url like https://www.reddit.com/r/sub/hot.json
-        return url.replace(/^https?:\/\//, 'https://r.jina.ai/http://');
-      }
-    },
-    // Optional: add your own CORS proxy (ex: 'https://your-proxy.example.com/fetch?url=')
-  ];
-
-  const defaultSubs = document.getElementById('subs');
-  const btn = document.getElementById('get');
-  const reloadBtn = document.getElementById('reload');
-  const titleEl = document.getElementById('title');
-  const memeEl = document.getElementById('meme');
-  const infoEl = document.getElementById('info');
-  const logEl = document.getElementById('log');
-
-  let lastMeme = null;
-
-  function log(...args){
-    console.log(...args);
-    logEl.textContent = (logEl.textContent ? logEl.textContent + '\n' : '') + args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-    // keep last 5000 chars
-    if(logEl.textContent.length > 5000) logEl.textContent = logEl.textContent.slice(-5000);
-  }
-
-  // helper: fetch with timeout
-  async function fetchWithTimeout(url, timeout=8000){
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(id);
-      return res;
-    } catch(e) {
-      clearTimeout(id);
-      throw e;
-    }
-  }
-
-  // Try proxies one-by-one to fetch reddit JSON
-  async function fetchRedditJson(redditJsonUrl){
-    for(const p of PROXIES){
-      const proxyUrl = p.build(redditJsonUrl);
-      log(`Trying proxy: ${p.name} -> ${proxyUrl}`);
-      try {
-        const resp = await fetchWithTimeout(proxyUrl, 9000);
-        if(!resp.ok){
-          log(`Proxy ${p.name} returned status ${resp.status}`);
-          continue;
-        }
-        // Try parse as JSON. Some proxies return HTML/text (if they scraped) but it may still be JSON text.
-        const text = await resp.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch(e) {
-          // Some proxies (r.jina.ai) return the raw page in plain text. r.jina.ai often returns HTML/scraped content,
-          // but when called with .json it may return JSON text. We'll try to find the JSON block or fallback.
-          // If parse fails, try to search for a JSON substring (basic heuristic).
-          const match = text.match(/\{(?:[\s\S]*?)"children":\s*\[/);
-          if(match){
-            // attempt to extract from first { ... } occurrence
-            const start = text.indexOf('{', match.index);
-            const end = text.lastIndexOf('}') + 1;
-            try {
-              data = JSON.parse(text.slice(start, end));
-            } catch(err2) {
-              log('Could not parse JSON from proxy response.');
-              continue;
-            }
-          } else {
-            log(`Proxy ${p.name} returned non-JSON and parse failed.`);
-            continue;
-          }
-        }
-        // data should have .data.children
-        if(!data || !data.data || !data.data.children) {
-          log(`Proxy ${p.name} returned JSON but no data.children present.`);
-          continue;
-        }
-        log(`Success from ${p.name}`);
-        return data;
-      } catch(err){
-        log(`Proxy ${p.name} failed: ${err && err.message ? err.message : err}`);
-        // try next
-      }
-    }
-    throw new Error('All proxies failed or returned no usable JSON.');
-  }
-
-  // Normalize and extract best image URL for a post
-  function extractImageUrl(postData){
-    if(!postData) return null;
-    // 1) direct image url
-    let url = postData.url || postData.url_overridden_by_dest || null;
-
-    // 2) if gallery: use preview or media_metadata
-    if(postData.is_gallery && postData.media_metadata){
-      // pick first item in gallery
-      const keys = Object.keys(postData.media_metadata);
-      if(keys.length){
-        const meta = postData.media_metadata[keys[0]];
-        // meta.s?.u or meta.p?... fallback
-        if(meta && meta.s && meta.s.u) url = meta.s.u;
-      }
-    }
-
-    // 3) if preview available (works for many posts, including some imgur/resized urls)
-    if((!url || url.indexOf('gallery')!==-1 || url.endsWith('.json')) && postData.preview && postData.preview.images && postData.preview.images[0]){
-      url = postData.preview.images[0].source.url || url;
-    }
-
-    if(!url) return null;
-
-    // reddit sometimes returns &amp; in urls
-    url = url.replace(/&amp;/g, '&');
-
-    // Some URLs are protocol-less or start with //, add https:
-    if(url.startsWith('//')) url = 'https:' + url;
-    if(url.startsWith('http:')) url = url.replace(/^http:/, 'https:');
-
-    // filter out reddit comments shortlinks etc
-    const imageExt = url.match(/\.(jpe?g|png|gif|webp)(\?|$)/i);
-    if(imageExt) return url;
-
-    // fallback if preview had width/height but url without extension (webp can be used)
-    if(url.indexOf('preview.redd.it') !== -1 || url.indexOf('i.redd.it') !== -1 || url.indexOf('i.imgur.com') !== -1) {
-      return url;
-    }
-
-    // If URL points to reddit gallery pages or imgur pages (not direct), try to use preview.url (if any)
-    return url;
-  }
-
-  async function getMemeOnce(){
-    titleEl.textContent = '';
-    memeEl.src = '';
-    infoEl.textContent = '';
-    logEl.textContent = '';
-
-    // Build subreddit list
-    const subs = (defaultSubs.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    if(subs.length === 0) subs.push('dankmemes');
-
-    const sr = subs[Math.floor(Math.random() * subs.length)];
-    const redditJsonUrl = `https://www.reddit.com/r/${sr}/hot.json?limit=80`;
-
-    try {
-      const data = await fetchRedditJson(redditJsonUrl);
-      const posts = (data.data && data.data.children) ? data.data.children.map(c => c.data) : [];
-      if(!posts || posts.length === 0) throw new Error('No posts in subreddit response');
-
-      // Filter posts for images
-      const candidates = posts.filter(p=>{
-        // prefer posts with image hints or preview
-        if(p.over_18 && p.spoiler) {} // keep as is
-        const direct = (p.post_hint === 'image') || !!(p.url && p.url.match(/\.(jpg|jpeg|png|gif|webp)(\?|$)/i));
-        const hasPreview = !!(p.preview && p.preview.images && p.preview.images.length>0);
-        const hasMediaMeta = !!p.media_metadata;
-        return direct || hasPreview || hasMediaMeta;
-      });
-
-      if(candidates.length === 0) throw new Error('No image posts found in the returned posts.');
-
-      // choose a random candidate (skipping stickied)
-      let tries = 0;
-      let chosen = null;
-      while(tries < 20 && !chosen){
-        const cand = candidates[Math.floor(Math.random() * candidates.length)];
-        if(cand.stickied){ tries++; continue; }
-        const imageUrl = extractImageUrl(cand);
-        if(imageUrl){
-          chosen = { post:cand, url:imageUrl };
-          break;
-        } else {
-          tries++;
-        }
-      }
-      if(!chosen) throw new Error('Could not extract an image URL from candidate posts.');
-
-      // success: display
-      titleEl.textContent = chosen.post.title;
-      memeEl.src = chosen.url;
-      infoEl.textContent = `r/${sr} • by u/${chosen.post.author} • score ${chosen.post.score} • ${chosen.post.num_comments} comments`;
-      lastMeme = chosen;
-      log('Displayed image URL:', chosen.url);
-    } catch(err){
-      log('Error while fetching/displaying meme:', err && err.message ? err.message : err);
-      titleEl.textContent = 'Failed to load meme — see log below';
-      infoEl.textContent = `Subreddit tried: r/${sr}.`;
-      // Add helpful suggestions
-      log('\nIf you see many "proxy failed" messages, public proxies may be blocked or rate-limited.');
-      log('Options:');
-      log('- Use a browser CORS extension for testing (e.g. "CORS Unblock") — not recommended for public deploy.');
-      log('- Deploy a tiny Cloudflare Worker as a CORS proxy and set PROXIES[0] to it (I can give that Worker code).');
-      log('- Try again later (public proxies sometimes go down).');
-    }
-  }
-
-  btn.addEventListener('click', getMemeOnce);
-  reloadBtn.addEventListener('click', ()=>{
-    if(lastMeme){
-      titleEl.textContent = lastMeme.post.title;
-      memeEl.src = lastMeme.url;
-      infoEl.textContent = `r/${lastMeme.post.subreddit} • by u/${lastMeme.post.author}`;
-    } else {
-      getMemeOnce();
-    }
-  });
-
-  // Load one automatically
-  getMemeOnce();
-
-})();
-</script>
+    <script src="script.js"></script>
 </body>
 </html>
